@@ -65,8 +65,7 @@ Writing (data from processor to drive):
 | --- | ------------- | -------- |
 | 7   | command_start | Written 1 before the host starts sending the command block |
 | 5   | sense_start   | Written 1 before the host starts reading the sense block |
-| 6   |  ?            | Unknown, there is a subroutine that writes this but it is not called from the BIOS INT13 handler |
-| 4   |  ?            | Unknown, used in the format routine (BIOS INT13, AH=0x05) |
+| 4   | dma_start?    | Written 1 when waiting for interrupt in a command with DMA, and in the INT13,AH=0x05 format track routine |
 
 ### irq_drq_ena register
 | Bit | Name    | Function |
@@ -79,7 +78,38 @@ Command, Sense and Data transfer
 -------------------------------
 
 ### Command block
-Commands are written to the drive as a series of 6 bytes which are written in succession to the command register (0x320). Before the start of a command block, the host waits for bit drive_bsy in sync_in to be cleared. Then for each byte, the host waits for bit data_rdy in sync_in to be set, and outputs the byte to the command register. The contents of the command block is as follows:
+Commands are written to the drive as a series of 6 bytes which are written in succession to the command register (0x320). 
+
+A command that does *not* require DMA data transfer is sent by the host using the following procedure:
+
+- Write 0x2 to the irq_drq_ena register (bit irq_ena high, drq_ena low)
+- Wait until bit drive_bsy in the sync_in register is cleared
+- For 6 bytes:
+  - wait until bit data_rdy in the sync_in register is set
+  - output the byte to the command register
+- Enable the IRQ5 interrupt on the PIC interrupt controller
+- Wait for IRQ5
+- Check the error bit in status. If set:
+  - If bits invalid_cmd in the status register are 00, perform a sense operation to find the cause. Otherwise, return error=01H Invalid command
+
+A command that *does* require DMA data transfer is sent by the host using the following procedure:
+
+- Wait until bit drive_bsy in the sync_in register is cleared
+- For 6 bytes:
+  - wait until bit data_rdy in the sync_in register is set
+  - output the byte to the command register
+- Wait until bit data_cmd_rdy in the sync_in register is set
+- Check the error bit in status. If set:
+  - If bits invalid_cmd in the status register are 00, perform a sense operation to find the cause. Otherwise, return error=01H Invalid command
+- Setup the DMA controller to transfer the apropriate amount of bytes
+- Write 0x3 to the irq_drq_ena register (bits irq_ena and drq_ena high)
+- Enable DRQ3 mask of the DMA controller
+- Enable the IRQ5 interrupt on the PIC interrupt controller
+- Write 0x10 to the sync_out register (bit dma_start)
+- Wait for IRQ5
+- Check the error bit in status. If set:
+  - If bits invalid_cmd in the status register are 00, perform a sense operation to find the cause. Otherwise, return error=01H Invalid command
+
 
 | Byte | Contents |
 | -----| -------- |
@@ -92,7 +122,21 @@ Commands are written to the drive as a series of 6 bytes which are written in su
 | 5    | Sector count |
 
 ### Sense block
-The sense block (14 bytes) is read from the drive at startup to determine the drive parameters (cylinders, heads, sectors), at then INT13, AH0x10 (test whether drive is ready) command, and whenever a command resulted in an error indicated by the error bit in the status register. Sense bytes are read from the sense register (0x320). Before reading the sense block, the host waits for bit drive_bsy in sync_in to be cleared. Then for each byte, the host waits for bit data_rdy in sync_in to be set, and the reads the byte. The contents of the sense block is as follows:
+The sense block (14 bytes) is read from the drive at startup to determine the drive parameters (cylinders, heads, sectors), at then INT13, AH0x10 (test whether drive is ready) command, and whenever a command resulted in an error indicated by the error bit in the status register. Sense bytes are read from the sense register (0x320). 
+
+The sense block is read using the following procedure:
+
+- Wait until bit drive_bsy is cleared
+- Write 0x20 to sync_out (sense_start = 1)
+- for 14 bytes:
+  - wait until bit data_rdy is set
+  - read sense register
+- Wait until bit data_cmd_rdy is set
+- Read status register; if bit 7 is set then an error occurred during the sense operation
+
+If an error occurred during the sense operation, the INT13 handler will return AH=0xff (sense failed)
+
+The contents of the sense block is as follows. The other bits do not seem to be used in the BIOS INT13 handler, and thus their meaning (if any) cannot be deduced from it.
 
 | Byte | Contents| BIOS INT13 error code AH |
 | ----- | ------ | ------- |

@@ -83,6 +83,10 @@ void Error_Handler(void);
 #define nIOACCESS_EXTI_IRQn EXTI1_IRQn
 #define nIORDY_Pin GPIO_PIN_2
 #define nIORDY_GPIO_Port GPIOB
+#define DEBUG_Pin GPIO_PIN_12
+#define DEBUG_GPIO_Port GPIOB
+#define USB_VBUS_ENA_Pin GPIO_PIN_13
+#define USB_VBUS_ENA_GPIO_Port GPIOB
 #define D6_Pin GPIO_PIN_6
 #define D6_GPIO_Port GPIOC
 #define D7_Pin GPIO_PIN_7

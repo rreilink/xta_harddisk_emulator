@@ -19,10 +19,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "usbh_msc.h"
+#include "xta.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,8 +44,6 @@
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart2;
 
-HCD_HandleTypeDef hhcd_USB_OTG_FS;
-
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -52,8 +52,9 @@ HCD_HandleTypeDef hhcd_USB_OTG_FS;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_USB_OTG_FS_HCD_Init(void);
 static void MX_NVIC_Init(void);
+void MX_USB_HOST_Process(void);
+
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -81,7 +82,7 @@ extern uint8_t command_block[6];
 extern uint8_t command_block_idx;
 extern volatile uint8_t command_execute;
 
-
+extern USBH_HandleTypeDef hUsbHostFS;
 /* USER CODE END 0 */
 
 /**
@@ -115,7 +116,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
-  MX_USB_OTG_FS_HCD_Init();
+  MX_USB_HOST_Init();
 
   /* Initialize interrupts */
   MX_NVIC_Init();
@@ -129,28 +130,75 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-
+  USBH_StatusTypeDef result = 0;
+  uint8_t buffer[2][512];
+  int ibuf=0;
 
   printf("Starting\n");
+  USBH_UsrLog("Log bla bla");
+  uint32_t lba=0, block_cnt=0;
+  int command = 0;
   while (1)
   {
-	  if (command_execute) {
+	  command = xta_get_command(&lba, &block_cnt);
+	  ibuf=0;
+	  if (command>=0) {
+
+		  xta_clear_irq();
+		  //printf("Command %02x LBA=%lu, size=%lu \n", command, lba, block_cnt);
 
 
-		  printf("Command %02x size=%d\n", command_block[0], command_block[5]);
-		  command_block_idx = 0;
+		  if ((command==CMD_READ) || (command==CMD_VERIFY)) { // read or verify
 
-		  if (command_block[0]==0x15) {
-			  xta_dma_transfer();
+			  // Fetch first sector
+			  DEBUG_GPIO_Port->BSRR = DEBUG_Pin;
+			  result = USBH_MSC_Read(&hUsbHostFS, 0, lba++, buffer[ibuf], 1);
+			  DEBUG_GPIO_Port->BSRR = DEBUG_Pin<<16;
+
+			  for (int i=block_cnt;i;i--) {
+				  if (result) printf("ERROR IN READ"); // TODO: return error via sense
+
+				  // Start data transfer in case of read command (no data for verify command)
+				  if (command == CMD_READ) {
+					  xta_dma_read_transfer_start(buffer[ibuf]);
+				  }
+
+				  // While transfer is going on, fetch next data into the other buffer
+				  ibuf=1-ibuf;
+				  if (i>1) {
+					  DEBUG_GPIO_Port->BSRR = DEBUG_Pin;
+					  result = USBH_MSC_Read(&hUsbHostFS, 0, lba++, buffer[ibuf], 1);
+					  DEBUG_GPIO_Port->BSRR = DEBUG_Pin<<16;
+				  }
+
+				  if (command == CMD_READ) {
+					  xta_dma_waitfinish();
+				  }
+
+			  }
+
+		  } else if (command==CMD_WRITE) {
+			  for (int i=0;i<block_cnt;i++) {
+				  xta_dma_write_transfer_start(buffer[0]);
+				  xta_dma_waitfinish();
+
+				  result = USBH_MSC_Write(&hUsbHostFS, 0, lba + i, buffer[0], 1);
+				  if (result) printf("ERROR IN WRITE"); // TODO: return error via sense
+
+			  }
+		  } else {
+			  printf("INVALID COMMAND");
 
 		  }
 
-		  xta_set_irq();
-		  command_execute = 0;
+	      xta_set_irq();
+
+
 	  }
 
 
     /* USER CODE END WHILE */
+    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
 
@@ -246,37 +294,6 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_HCD_Init(void)
-{
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
-
-  /* USER CODE END USB_OTG_FS_Init 0 */
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
-
-  /* USER CODE END USB_OTG_FS_Init 1 */
-  hhcd_USB_OTG_FS.Instance = USB_OTG_FS;
-  hhcd_USB_OTG_FS.Init.Host_channels = 8;
-  hhcd_USB_OTG_FS.Init.speed = HCD_SPEED_FULL;
-  hhcd_USB_OTG_FS.Init.dma_enable = DISABLE;
-  hhcd_USB_OTG_FS.Init.phy_itface = HCD_PHY_EMBEDDED;
-  hhcd_USB_OTG_FS.Init.Sof_enable = DISABLE;
-  if (HAL_HCD_Init(&hhcd_USB_OTG_FS) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
-
-  /* USER CODE END USB_OTG_FS_Init 2 */
-
-}
-
-/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -295,7 +312,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, nIORDY_Pin|DRQ_Pin|IRQ_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, nIORDY_Pin|DEBUG_Pin|USB_VBUS_ENA_Pin|DRQ_Pin
+                          |IRQ_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -331,6 +349,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : DEBUG_Pin USB_VBUS_ENA_Pin */
+  GPIO_InitStruct.Pin = DEBUG_Pin|USB_VBUS_ENA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pins : A0_Pin A1_Pin A2_Pin nDACK_Pin */

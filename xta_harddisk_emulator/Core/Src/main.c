@@ -81,6 +81,7 @@ int _write(int fd, char* ptr, int len) {
 extern uint8_t command_block[6];
 extern uint8_t command_block_idx;
 extern volatile uint8_t command_execute;
+extern uint8_t regs[9];
 
 extern USBH_HandleTypeDef hUsbHostFS;
 /* USER CODE END 0 */
@@ -123,6 +124,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   xta_init();
+  GPIOC->OSPEEDR = 0xffff;
 
 
   /* USER CODE END 2 */
@@ -138,8 +140,11 @@ int main(void)
   USBH_UsrLog("Log bla bla");
   uint32_t lba=0, block_cnt=0;
   int command = 0;
+
   while (1)
   {
+	  // TODO: sync using register 0x322
+
 	  command = xta_get_command(&lba, &block_cnt);
 	  ibuf=0;
 	  if (command>=0) {
@@ -172,6 +177,7 @@ int main(void)
 				  }
 
 				  if (command == CMD_READ) {
+					  //regs[2]|=2; // data available // todo: lock-free interrupt safe implementation
 					  xta_dma_waitfinish();
 				  }
 
@@ -179,6 +185,7 @@ int main(void)
 
 		  } else if (command==CMD_WRITE) {
 			  for (int i=0;i<block_cnt;i++) {
+				  //regs[2]|=2; // ready for dma // todo: lock-free interrupt safe implementation
 				  xta_dma_write_transfer_start(buffer[0]);
 				  xta_dma_waitfinish();
 
@@ -192,7 +199,8 @@ int main(void)
 		  }
 
 	      xta_set_irq();
-
+	      //regs[2] &=~(2|4);// todo: lock-free interrupt safe implementation
+		  printf("DONE\n");
 
 	  }
 
@@ -258,6 +266,12 @@ static void MX_NVIC_Init(void)
   /* EXTI1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+  /* EXTI0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+  /* EXTI2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 }
 
 /**
@@ -312,7 +326,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, nIORDY_Pin|DEBUG_Pin|USB_VBUS_ENA_Pin|DRQ_Pin
+  HAL_GPIO_WritePin(GPIOB, DEBUG_Pin|USB_VBUS_ENA_Pin|nIORDY_Pin|DRQ_Pin
                           |IRQ_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
@@ -338,25 +352,31 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : nIOACCESS_Pin */
-  GPIO_InitStruct.Pin = nIOACCESS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(nIOACCESS_GPIO_Port, &GPIO_InitStruct);
+  /*Configure GPIO pins : RD_REG_Pin RD_DMA_Pin */
+  GPIO_InitStruct.Pin = RD_REG_Pin|RD_DMA_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : nIORDY_Pin DRQ_Pin IRQ_Pin */
-  GPIO_InitStruct.Pin = nIORDY_Pin|DRQ_Pin|IRQ_Pin;
+  /*Configure GPIO pin : nWR_Pin */
+  GPIO_InitStruct.Pin = nWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(nWR_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : DEBUG_Pin nIORDY_Pin DRQ_Pin IRQ_Pin */
+  GPIO_InitStruct.Pin = DEBUG_Pin|nIORDY_Pin|DRQ_Pin|IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : DEBUG_Pin USB_VBUS_ENA_Pin */
-  GPIO_InitStruct.Pin = DEBUG_Pin|USB_VBUS_ENA_Pin;
+  /*Configure GPIO pin : USB_VBUS_ENA_Pin */
+  GPIO_InitStruct.Pin = USB_VBUS_ENA_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(USB_VBUS_ENA_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : A0_Pin A1_Pin A2_Pin nDACK_Pin */
   GPIO_InitStruct.Pin = A0_Pin|A1_Pin|A2_Pin|nDACK_Pin;

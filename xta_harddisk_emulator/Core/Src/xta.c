@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <assert.h>
+#include <stdio.h>
 #include "main.h"
 
 uint16_t sample=0;
@@ -120,7 +121,7 @@ void xta_dma_read_transfer_start(unsigned char * data) {
 	  irq_drq_update();
 
 }
-
+volatile int wr_cnt=0;
 void xta_dma_waitfinish(void) {
 	uint16_t vv,v=0xffff;
 	  while(irq_drq_val & 1) {
@@ -132,9 +133,13 @@ void xta_dma_waitfinish(void) {
 		  }
 
 	  }
+		printf("out wr=%d\n", wr_cnt);
+
 }
 
 void xta_dma_write_transfer_start(unsigned char * data) {
+      printf("in wr=%d\n", wr_cnt);
+
 	  dma_ptr = data;
 	  dma_cnt = 512; // 512 bytes remain to be written
 
@@ -190,6 +195,7 @@ void EXTI0_IRQHandler(void)
 
 	PINLOW(nIORDY);  // IO is ready
 	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_0);
+	__DSB();
 
 	// Wait for I/O cycle to finish
 	while(PINSTATE(RD_REG));
@@ -211,22 +217,24 @@ void EXTI0_IRQHandler(void)
 
 }
 
+
+
 /* IO write interrupt (register or DMA)
  *
  */
 void EXTI1_IRQHandler(void)
 {
-
+	PINHIGH(DEBUG2);
+    for (int i=0;i<20;i++) asm("nop\n");
 
 	// first thing to do: sample the data
 	sample = GPIOC->IDR;
     //printf("%x\n", sample>>8);
-
-
+	if (PINSTATE(nWR)) {
+		PINHIGH(DEBUG);
+	}
 	uint8_t address;
 
-	PINLOW(DRQ); // temporarily lower DRQ
-	PINLOW(nIORDY); // IO is ready todo: optimize, move forward, but ensure DRQ is lowered before
 
 
 	if (!(sample & nDACK_Pin)) {
@@ -237,12 +245,13 @@ void EXTI1_IRQHandler(void)
 		}
 
 		if (!dma_cnt) {
-			PINLOW(DRQ); // DRQ low, to make sure no transfer is started after the last byte of a block
+			//PINLOW(DRQ); // DRQ low, to make sure no transfer is started after the last byte of a block
 
 			irq_drq_val &=~1; // clear DRQ
 		}
 
 	} else {
+		wr_cnt++;
 		// Non-DMA write
 		address = (sample >> 8) & 7;
 		if (address == 0) {
@@ -288,20 +297,23 @@ void EXTI1_IRQHandler(void)
 		}*/
 	}
 
+	irq_drq_update(); // Set DRQ to the required value
 
+	PINLOW(nIORDY); // IO is ready todo: optimize, move forward, but ensure DRQ is lowered before
 
+	__HAL_GPIO_EXTI_CLEAR_IT(nWR_Pin);
+	__DSB();
 
-
-
-	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_1);
 
 	while(!PINSTATE(nWR));
 
 	PINHIGH(nIORDY);  // IO is not ready (next access)
+	PINLOW(DEBUG);
 
 
+	PINLOW(DEBUG2);
 
-	irq_drq_update(); // Set DRQ to the required value
+
 
 }
 
@@ -313,33 +325,34 @@ void EXTI1_IRQHandler(void)
 
 void EXTI2_IRQHandler(void)
 {
-	//static uint8_t data=0x3a;
+	PINHIGH(DEBUG3);
 	GPIOC->MODER = MODER_OUTPUTS;
+
+	if (!PINSTATE(RD_DMA)) {
+		PINHIGH(DEBUG);
+	}
+
 	if (dma_cnt==0) { // transfer completed
 		irq_drq_val &=~1; // clear DRQ flag
 		irq_drq_update(); // Set DRQ to the required value
 	} else {
 		regs[8] = *(dma_ptr++);
 		dma_cnt--;
-		//regs[8] = regs[8] | (regs[8]<<1);
 	}
 
+    for (int i=0;i<20;i++) asm("nop\n");
 
-	//PINLOW(DRQ); // temporarily lower DRQ
-	for(int i=0;i<10; i++)  asm("nop\n");
+
 	PINLOW(nIORDY);  // IO is ready
 	__HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_2);
+	__DSB();
 
 	// Wait for I/O cycle to finish
 	while(PINSTATE(RD_DMA));
-	//for(int i=0;i<50; i++)  asm("nop\n");
 	GPIOC->MODER = MODER_INPUTS;
 	PINHIGH(nIORDY);  // IO is not ready (next access)
 
-	//data ^= 0xff;
-
-    //dma_cnt--;
-
 	GPIOC->ODR=regs[8];
-
+	PINLOW(DEBUG3);
+	PINLOW(DEBUG);
 }

@@ -23,6 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <assert.h>
 #include "usbh_msc.h"
 #include "xta.h"
 /* USER CODE END Includes */
@@ -150,15 +151,15 @@ int main(void)
 	  if (command>=0) {
 
 		  xta_clear_irq();
-		  //printf("Command %02x LBA=%lu, size=%lu \n", command, lba, block_cnt);
+		  printf("Command %02x LBA=%lu, size=%lu \n", command, lba, block_cnt);
 
 
 		  if ((command==CMD_READ) || (command==CMD_VERIFY)) { // read or verify
 
 			  // Fetch first sector
-			  DEBUG_GPIO_Port->BSRR = DEBUG_Pin;
+			  //DEBUG_GPIO_Port->BSRR = DEBUG_Pin;
 			  result = USBH_MSC_Read(&hUsbHostFS, 0, lba++, buffer[ibuf], 1);
-			  DEBUG_GPIO_Port->BSRR = DEBUG_Pin<<16;
+			  //DEBUG_GPIO_Port->BSRR = DEBUG_Pin<<16;
 
 			  for (int i=block_cnt;i;i--) {
 				  if (result) printf("ERROR IN READ"); // TODO: return error via sense
@@ -171,9 +172,9 @@ int main(void)
 				  // While transfer is going on, fetch next data into the other buffer
 				  ibuf=1-ibuf;
 				  if (i>1) {
-					  DEBUG_GPIO_Port->BSRR = DEBUG_Pin;
+					  //DEBUG_GPIO_Port->BSRR = DEBUG_Pin;
 					  result = USBH_MSC_Read(&hUsbHostFS, 0, lba++, buffer[ibuf], 1);
-					  DEBUG_GPIO_Port->BSRR = DEBUG_Pin<<16;
+					  //DEBUG_GPIO_Port->BSRR = DEBUG_Pin<<16;
 				  }
 
 				  if (command == CMD_READ) {
@@ -326,8 +327,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, DEBUG_Pin|USB_VBUS_ENA_Pin|nIORDY_Pin|DRQ_Pin
-                          |IRQ_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, DEBUG_Pin|USB_VBUS_ENA_Pin|DEBUG2_Pin|DEBUG3_Pin
+                          |nIORDY_Pin|DRQ_Pin|IRQ_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
@@ -349,7 +350,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : RD_REG_Pin RD_DMA_Pin */
@@ -364,19 +365,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(nWR_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : DEBUG_Pin nIORDY_Pin DRQ_Pin IRQ_Pin */
-  GPIO_InitStruct.Pin = DEBUG_Pin|nIORDY_Pin|DRQ_Pin|IRQ_Pin;
+  /*Configure GPIO pins : DEBUG_Pin USB_VBUS_ENA_Pin DEBUG2_Pin DEBUG3_Pin
+                           nIORDY_Pin DRQ_Pin IRQ_Pin */
+  GPIO_InitStruct.Pin = DEBUG_Pin|USB_VBUS_ENA_Pin|DEBUG2_Pin|DEBUG3_Pin
+                          |nIORDY_Pin|DRQ_Pin|IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : USB_VBUS_ENA_Pin */
-  GPIO_InitStruct.Pin = USB_VBUS_ENA_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(USB_VBUS_ENA_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : A0_Pin A1_Pin A2_Pin nDACK_Pin */
   GPIO_InitStruct.Pin = A0_Pin|A1_Pin|A2_Pin|nDACK_Pin;

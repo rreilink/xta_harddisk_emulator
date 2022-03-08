@@ -1,0 +1,3 @@
+(fp_lib_table
+  (lib (name FTSH-105-XX-X-DV)(type KiCad)(uri ${KIPRJMOD}/FTSH-105-XX-X-DV)(options "")(descr ""))
+)
